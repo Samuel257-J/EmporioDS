@@ -67,8 +67,9 @@ class TelaGerenciarEstoque(tk.Toplevel):
         # Conecta Scrollbar com Listbox
         scrollbar.config(command=self.lista_produtos.yview)
 
-        # Evento de seleção
+        # Eventos de seleção
         self.lista_produtos.bind("<<ListboxSelect>>", self.selecionar_produto)
+        self.lista_produtos.bind("<Double-Button-1>", self.abrir_edicao_produto)
 
         # Frame detalhes como container invisível
         self.frame_detalhes = tk.Frame(self.canvas, bg="#050505")
@@ -109,9 +110,25 @@ class TelaGerenciarEstoque(tk.Toplevel):
         self.botao_menos.pack(side=tk.LEFT, padx=5)
         self.botao_mais.pack(side=tk.LEFT, padx=5)
 
-        # Botão confirmar com tamanho fixo
-        self.botao_confirmar = tk.Button(self.frame_detalhes, text="Confirmar", font=("Arial", 12), bg="green", fg="white", command=self.confirmar_estoque, width=20, height=1)
-        self.botao_confirmar.pack(pady=5)
+        # Frame para os botões de ação principais (Confirmar e Desativar/Reativar)
+        frame_acoes_principais = tk.Frame(self.frame_detalhes, bg="#050505")
+        frame_acoes_principais.pack(pady=5)
+
+        # Botão confirmar
+        self.botao_confirmar = tk.Button(frame_acoes_principais, text="Confirmar", font=("Arial", 12), bg="green", fg="white", command=self.confirmar_estoque, width=10, height=1)
+        self.botao_confirmar.pack(side=tk.LEFT, padx=5)
+
+        # Botão excluir produto (que muda dinamicamente)
+        self.botao_excluir = tk.Button(frame_acoes_principais, text="Desativar", font=("Arial", 12), bg="orange", fg="white", command=self.excluir_produto, width=10, height=1)
+        self.botao_excluir.pack(side=tk.LEFT, padx=5)
+
+        # Frame separado para o botão de editar (abaixo dos outros)
+        frame_acao_secundaria = tk.Frame(self.frame_detalhes, bg="#050505")
+        frame_acao_secundaria.pack(pady=(5, 0))
+
+        # Botão editar produto (centralizado no seu próprio frame)
+        self.botao_editar = tk.Button(frame_acao_secundaria, text="Editar", font=("Arial", 12), bg="blue", fg="white", command=self.abrir_edicao_produto, width=22, height=1)
+        self.botao_editar.pack()
 
         self.estoque_temp = None
         self.carregar_produtos()
@@ -125,11 +142,21 @@ class TelaGerenciarEstoque(tk.Toplevel):
                 database='lanchonete_db'
             )
             cursor = conexao.cursor()
-            cursor.execute("SELECT id, nome, estoque FROM produtos ORDER BY estoque ASC")
+            # Carregar todos os produtos com informação sobre se estão ativos
+            cursor.execute("""
+                SELECT id, nome, estoque, COALESCE(ativo, TRUE) as ativo FROM produtos 
+                ORDER BY COALESCE(ativo, TRUE) DESC, estoque ASC
+            """)
             self.produtos = cursor.fetchall()
             self.atualizar_lista()
         except Error as e:
-            messagebox.showerror("Erro", f"Erro ao carregar produtos: {e}")
+            # Se der erro (provavelmente porque a coluna 'ativo' não existe), carregar normalmente
+            try:
+                cursor.execute("SELECT id, nome, estoque, TRUE as ativo FROM produtos ORDER BY estoque ASC")
+                self.produtos = cursor.fetchall()
+                self.atualizar_lista()
+            except Error as e2:
+                messagebox.showerror("Erro", f"Erro ao carregar produtos: {e2}")
         finally:
             if 'conexao' in locals() and conexao.is_connected():
                 cursor.close()
@@ -142,16 +169,24 @@ class TelaGerenciarEstoque(tk.Toplevel):
         index = 0
         
         for produto in self.produtos:
-            nome, estoque = produto[1], produto[2]
+            nome, estoque, ativo = produto[1], produto[2], produto[3] if len(produto) > 3 else True
             if nome.lower().startswith(filtro.lower()):
-                # Adiciona o item na lista
-                self.lista_produtos.insert(tk.END, f"{nome} - Estoque: {estoque}")
+                # Se o produto está inativo, mostrar estoque como 0
+                estoque_exibido = 0 if not ativo else estoque
+                status_texto = " (INATIVO)" if not ativo else ""
                 
-                # Se o estoque for <= 10, muda a cor de fundo para vermelho
-                if estoque <= 10:
+                # Adiciona o item na lista
+                self.lista_produtos.insert(tk.END, f"{nome}{status_texto} - Estoque: {estoque_exibido}")
+                
+                # Definir cores baseadas no status e estoque
+                if not ativo:
+                    # Produto inativo - cinza
+                    self.lista_produtos.itemconfig(index, {'bg': '#808080', 'fg': 'white'})
+                elif estoque <= 10:
+                    # Produto ativo com estoque baixo - vermelho
                     self.lista_produtos.itemconfig(index, {'bg': '#FF4444', 'fg': 'white'})
                 else:
-                    # Restaura a cor padrão para itens com estoque normal
+                    # Produto ativo com estoque normal - branco
                     self.lista_produtos.itemconfig(index, {'bg': 'white', 'fg': 'black'})
                 
                 index += 1
@@ -168,9 +203,100 @@ class TelaGerenciarEstoque(tk.Toplevel):
             produtos_visiveis = [p for p in self.produtos if p[1].lower().startswith(nome_filtrado)]
             self.produto_selecionado = produtos_visiveis[index]
             self.estoque_temp = None
+            
+            # Verificar se o produto está ativo
+            produto_ativo = self.produto_selecionado[3] if len(self.produto_selecionado) > 3 else True
+            
             self.label_nome.config(text=f"Nome: {self.produto_selecionado[1][:40]}")  # corta o nome se for muito grande
             self.entry_estoque.delete(0, tk.END)
-            self.entry_estoque.insert(0, str(self.produto_selecionado[2]))
+            
+            if produto_ativo:
+                # Produto ativo - mostrar estoque real e permitir edição
+                self.entry_estoque.insert(0, str(self.produto_selecionado[2]))
+                self.entry_estoque.config(state='normal')
+                self.botao_mais.config(state='normal')
+                self.botao_menos.config(state='normal')
+                self.botao_confirmar.config(state='normal')
+                self.botao_excluir.config(text="Desativar", bg="orange", state='normal')
+                self.botao_editar.config(state='normal')
+            else:
+                # Produto inativo - mostrar 0 e desabilitar edição de estoque
+                self.entry_estoque.insert(0, "0")
+                self.entry_estoque.config(state='disabled')
+                self.botao_mais.config(state='disabled')
+                self.botao_menos.config(state='disabled')
+                self.botao_confirmar.config(state='disabled')
+                self.botao_excluir.config(text="Reativar", bg="green", state='normal')
+                self.botao_editar.config(state='normal')  # Permite editar produtos inativos
+
+    def abrir_edicao_produto(self, event=None):
+        """Abre a TelaCadastroProduto para editar o produto selecionado"""
+        if not self.produto_selecionado:
+            messagebox.showwarning("Nenhum produto selecionado", "Selecione um produto para editar.", parent=self)
+            return
+
+        try:
+            # Buscar todas as informações do produto no banco
+            conexao = mysql.connector.connect(
+                host='localhost',
+                user='emporioDoSabor',
+                password='admin321@s',
+                database='lanchonete_db'
+            )
+            cursor = conexao.cursor()
+            
+            # Buscar todos os dados do produto
+            cursor.execute("""
+                SELECT id, nome, preco, categoria, estoque, 
+                    COALESCE(ativo, TRUE) as ativo 
+                FROM produtos WHERE id = %s
+            """, (self.produto_selecionado[0],))
+            
+            produto_completo = cursor.fetchone()
+            
+            if produto_completo:
+                # Importar e abrir a TelaCadastroProduto
+                try:
+                    from tela_Gerente import TelaCadastroProduto
+                    
+                    # Criar instância da TelaCadastroProduto em modo de edição
+                    tela_cadastro = TelaCadastroProduto(self, produto_para_editar=produto_completo)
+                    
+                    # Aguardar o fechamento da tela de cadastro e recarregar os produtos
+                    self.wait_window(tela_cadastro)
+                    
+                    # IMPORTANTE: Recarregar os dados após a edição
+                    self.carregar_produtos()
+                    
+                    # Limpar seleção atual para forçar nova seleção
+                    self.produto_selecionado = None
+                    self.estoque_temp = None
+                    
+                    # Limpar campos de detalhes
+                    self.label_nome.config(text="Nome: ")
+                    self.entry_estoque.delete(0, tk.END)
+                    self.entry_estoque.config(state='normal')
+                    
+                    # Desabilitar botões até nova seleção
+                    self.botao_mais.config(state='disabled')
+                    self.botao_menos.config(state='disabled')
+                    self.botao_confirmar.config(state='disabled')
+                    self.botao_excluir.config(state='disabled', text="Desativar", bg="orange")
+                    self.botao_editar.config(state='disabled')
+                    
+                except ImportError:
+                    messagebox.showerror("Erro", "Não foi possível importar TelaCadastroProduto.\nVerifique se o arquivo tela_Gerente.py existe e contém a classe TelaCadastroProduto.", parent=self)
+                except Exception as e:
+                    messagebox.showerror("Erro", f"Erro ao abrir tela de edição:\n{e}", parent=self)
+            else:
+                messagebox.showerror("Erro", "Produto não encontrado no banco de dados.", parent=self)
+                
+        except mysql.connector.Error as e:
+            messagebox.showerror("Erro", f"Erro ao buscar dados do produto:\n{e}", parent=self)
+        finally:
+            if 'conexao' in locals() and conexao.is_connected():
+                cursor.close()
+                conexao.close()
 
     def atualizar_estoque_no_banco(self, novo_estoque):
         try:
@@ -192,6 +318,11 @@ class TelaGerenciarEstoque(tk.Toplevel):
 
     def aumentar_estoque(self):
         if self.produto_selecionado:
+            # Verificar se o produto está ativo
+            produto_ativo = self.produto_selecionado[3] if len(self.produto_selecionado) > 3 else True
+            if not produto_ativo:
+                return
+                
             if self.estoque_temp is None:
                 self.estoque_temp = self.produto_selecionado[2]
             self.estoque_temp += 10
@@ -200,6 +331,11 @@ class TelaGerenciarEstoque(tk.Toplevel):
 
     def diminuir_estoque(self):
         if self.produto_selecionado:
+            # Verificar se o produto está ativo
+            produto_ativo = self.produto_selecionado[3] if len(self.produto_selecionado) > 3 else True
+            if not produto_ativo:
+                return
+                
             if self.estoque_temp is None:
                 self.estoque_temp = self.produto_selecionado[2]
             self.estoque_temp = max(0, self.estoque_temp - 10)
@@ -212,22 +348,192 @@ class TelaGerenciarEstoque(tk.Toplevel):
             if not valor_digitado.isdigit():
                 messagebox.showwarning("Entrada inválida", "Digite um valor numérico válido para o estoque.", parent=self)
                 return
+
             estoque_final = int(valor_digitado)
+            id_produto = self.produto_selecionado[0]
+            estoque_anterior = self.produto_selecionado[2]  # Estoque atual antes da edição
 
             resposta = messagebox.askyesno(
                 "Confirmar Alteração",
-                f"Deseja realmente atualizar o estoque para {estoque_final}?",
+                f"Deseja realmente atualizar o estoque de {estoque_anterior} para {estoque_final}?",
                 icon='warning',
                 parent=self
             )
+
             if resposta:
-                self.atualizar_estoque_no_banco(estoque_final)
-                self.produto_selecionado = (self.produto_selecionado[0], self.produto_selecionado[1], estoque_final)
-                self.estoque_temp = None
-                messagebox.showinfo("Sucesso", "Estoque atualizado com sucesso.", parent=self)
-                self.entry_estoque.delete(0, tk.END)
-                self.entry_estoque.insert(0, str(estoque_final))
-                self.carregar_produtos()
+                try:
+                    conn = mysql.connector.connect(
+                        host="localhost",
+                        user="emporioDoSabor",
+                        password="admin321@s",
+                        database="lanchonete_db"
+                    )
+                    cursor = conn.cursor()
+
+                    # Atualizar a quantidade total de estoque (substituir)
+                    self.atualizar_estoque_no_banco(estoque_final)
+
+                    # Calcular a diferença e registrar na tabela estoque
+                    if estoque_final < estoque_anterior:
+                        saida = estoque_anterior - estoque_final
+                        cursor.execute("""
+                            INSERT INTO estoque (id_produto, quantidade_saida)
+                            VALUES (%s, %s)
+                        """, (id_produto, saida))
+
+                    elif estoque_final > estoque_anterior:
+                        entrada = estoque_final - estoque_anterior
+                        cursor.execute("""
+                            INSERT INTO estoque (id_produto, quantidade_entrada)
+                            VALUES (%s, %s)
+                        """, (id_produto, entrada))
+
+                    conn.commit()
+
+                    # CORREÇÃO: Atualizar a lista de produtos para refletir a mudança
+                    for i, produto in enumerate(self.produtos):
+                        if produto[0] == id_produto:
+                            # Atualizar o produto na lista mantendo a estrutura original
+                            produto_ativo = produto[3] if len(produto) > 3 else True
+                            self.produtos[i] = (id_produto, produto[1], estoque_final, produto_ativo)
+                            break
+
+                    # Atualizar estado interno do produto selecionado
+                    produto_ativo = self.produto_selecionado[3] if len(self.produto_selecionado) > 3 else True
+                    self.produto_selecionado = (id_produto, self.produto_selecionado[1], estoque_final, produto_ativo)
+                    self.estoque_temp = None
+
+                    messagebox.showinfo("Sucesso", "Estoque atualizado com sucesso.", parent=self)
+                    
+                    # Atualizar a exibição da lista
+                    self.atualizar_lista(self.entry_filtro.get())
+                    
+                    # Atualizar o campo de entrada para mostrar o novo valor
+                    self.entry_estoque.delete(0, tk.END)
+                    self.entry_estoque.insert(0, str(estoque_final))
+                    
+                    # CORREÇÃO: Reabilitar os botões após a confirmação
+                    # (isso resolve o problema do botão Desativar ficar inativo)
+                    if produto_ativo:
+                        # Para produtos ativos
+                        self.entry_estoque.config(state='normal')
+                        self.botao_mais.config(state='normal')
+                        self.botao_menos.config(state='normal')
+                        self.botao_confirmar.config(state='normal')
+                        self.botao_excluir.config(text="Desativar", bg="orange", state='normal')
+                        self.botao_editar.config(state='normal')
+                    else:
+                        # Para produtos inativos (caso raro, mas por segurança)
+                        self.entry_estoque.config(state='disabled')
+                        self.botao_mais.config(state='disabled')
+                        self.botao_menos.config(state='disabled')
+                        self.botao_confirmar.config(state='disabled')
+                        self.botao_excluir.config(text="Reativar", bg="green", state='normal')
+                        self.botao_editar.config(state='normal')
+
+                except mysql.connector.Error as e:
+                    messagebox.showerror("Erro", f"Erro ao atualizar o estoque:\n{e}", parent=self)
+                    if 'conn' in locals() and conn.is_connected():
+                        conn.rollback()
+                finally:
+                    if 'conn' in locals() and conn.is_connected():
+                        cursor.close()
+                        conn.close()
+
+    def excluir_produto(self):
+        """Desativa/Reativa o produto selecionado após confirmação"""
+        if not self.produto_selecionado:
+            messagebox.showwarning("Nenhum produto selecionado", "Selecione um produto para desativar/reativar.", parent=self)
+            return
+
+        nome_produto = self.produto_selecionado[1]
+        id_produto = self.produto_selecionado[0]
+        produto_ativo = self.produto_selecionado[3] if len(self.produto_selecionado) > 3 else True
+
+        if produto_ativo:
+            # Produto está ativo - desativar
+            resposta = messagebox.askyesno(
+                "Confirmar Desativação",
+                f"Tem certeza que deseja desativar o produto '{nome_produto}'?\n\n• O produto ficará indisponível para vendas\n• O estoque será zerado na exibição\n• O histórico de vendas será mantido\n• Pode ser reativado a qualquer momento",
+                icon='warning',
+                parent=self
+            )
+
+            if resposta:
+                try:
+                    conn = mysql.connector.connect(
+                        host="localhost",
+                        user="emporioDoSabor",
+                        password="admin321@s",
+                        database="lanchonete_db"
+                    )
+                    cursor = conn.cursor()
+
+                    # Verificar se a coluna 'ativo' existe na tabela produtos
+                    cursor.execute("SHOW COLUMNS FROM produtos LIKE 'ativo'")
+                    coluna_existe = cursor.fetchone()
+                    
+                    if not coluna_existe:
+                        # Adicionar coluna 'ativo' se não existir
+                        cursor.execute("ALTER TABLE produtos ADD COLUMN ativo BOOLEAN DEFAULT TRUE")
+                        conn.commit()
+
+                    # Marcar o produto como inativo
+                    cursor.execute("UPDATE produtos SET ativo = FALSE WHERE id = %s", (id_produto,))
+                    conn.commit()
+
+                    if cursor.rowcount > 0:
+                        messagebox.showinfo("Sucesso", f"Produto '{nome_produto}' desativado com sucesso!", parent=self)
+                        self.carregar_produtos()
+                    else:
+                        messagebox.showwarning("Aviso", "Nenhum produto foi desativado.", parent=self)
+
+                except mysql.connector.Error as e:
+                    messagebox.showerror("Erro", f"Erro ao desativar produto:\n{e}", parent=self)
+                    if 'conn' in locals() and conn.is_connected():
+                        conn.rollback()
+                finally:
+                    if 'conn' in locals() and conn.is_connected():
+                        cursor.close()
+                        conn.close()
+        
+        else:
+            # Produto está inativo - reativar
+            resposta = messagebox.askyesno(
+                "Confirmar Reativação",
+                f"Tem certeza que deseja reativar o produto '{nome_produto}'?\n\n• O produto voltará a ficar disponível para vendas\n• Você poderá definir um novo estoque\n• O produto aparecerá normalmente nas listas",
+                icon='question',
+                parent=self
+            )
+
+            if resposta:
+                try:
+                    conn = mysql.connector.connect(
+                        host="localhost",
+                        user="emporioDoSabor",
+                        password="admin321@s",
+                        database="lanchonete_db"
+                    )
+                    cursor = conn.cursor()
+
+                    # Marcar o produto como ativo
+                    cursor.execute("UPDATE produtos SET ativo = TRUE WHERE id = %s", (id_produto,))
+                    conn.commit()
+
+                    if cursor.rowcount > 0:
+                        messagebox.showinfo("Sucesso", f"Produto '{nome_produto}' reativado com sucesso!\n\nAgora você pode definir um novo estoque.", parent=self)
+                        self.carregar_produtos()
+                    else:
+                        messagebox.showwarning("Aviso", "Nenhum produto foi reativado.", parent=self)
+
+                except mysql.connector.Error as e:
+                    messagebox.showerror("Erro", f"Erro ao reativar produto:\n{e}", parent=self)
+                    if 'conn' in locals and conn.is_connected():
+                        conn.rollback()
+                finally:
+                    if 'conn' in locals() and conn.is_connected():
+                        cursor.close()
+                        conn.close()
 
     def validar_numeros(self, valor):
         return valor.isdigit() or valor == ""

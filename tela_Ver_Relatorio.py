@@ -1,9 +1,18 @@
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, filedialog
 import mysql.connector
 from mysql.connector import Error
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# Importações para PDF
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+import os
 
 class ModernButton(tk.Frame):
     def __init__(self, parent, text, command, bg_color="#4a9eff", hover_color="#6bb6ff", **kwargs):
@@ -129,6 +138,9 @@ class TelaVerRelatorioModerna(tk.Toplevel):
             'text_primary': '#f0f6fc',
             'text_secondary': '#8b949e'
         }
+        
+        # Variáveis para armazenar dados atuais do relatório
+        self.dados_relatorio_atual = {}
         
         # Criar interface
         self.criar_interface()
@@ -281,7 +293,7 @@ class TelaVerRelatorioModerna(tk.Toplevel):
         acoes_frame.pack(pady=15)
         
         # Botões de ação compactos
-        ModernButton(acoes_frame, "📄 Exportar", self.exportar_relatorio,
+        ModernButton(acoes_frame, "📄 Exportar PDF", self.exportar_relatorio,
                     self.colors['accent_blue']).pack(side="left", padx=8)
         
         ModernButton(acoes_frame, "🔄 Atualizar", self.atualizar_relatorio,
@@ -354,11 +366,15 @@ class TelaVerRelatorioModerna(tk.Toplevel):
             # Obter filtro de data
             data_inicio, data_fim = self.get_data_filtro()
 
-            # Atualizar todos os cards
+            # Atualizar todos os cards e coletar dados
+            self.dados_relatorio_atual = {}
             self.atualizar_financeiro(cursor, data_inicio, data_fim)
             self.atualizar_clientes(cursor)
             self.atualizar_produtos_alta(cursor, data_inicio, data_fim)
             self.atualizar_funcionarios(cursor)
+            
+            # Coletar dados detalhados para o PDF
+            self.coletar_dados_detalhados(cursor, data_inicio, data_fim)
 
         except Error as e:
             messagebox.showerror("Erro de Conexão", f"Erro ao conectar com o banco de dados:\n{e}")
@@ -374,12 +390,51 @@ class TelaVerRelatorioModerna(tk.Toplevel):
                 cursor.close()
                 conexao.close()
 
+    def coletar_dados_detalhados(self, cursor, data_inicio, data_fim):
+        """Coleta dados detalhados para incluir no PDF"""
+        try:
+            # Top 5 produtos mais vendidos
+            cursor.execute("""
+                SELECT p.nome, SUM(ip.quantidade) as total_vendido, SUM(ip.valor_total) as receita_produto
+                FROM produtos p
+                INNER JOIN itens_pedido ip ON p.id = ip.id_produto
+                INNER JOIN pedidos ped ON ip.id_pedido = ped.id
+                WHERE ped.status IN ('finalizado', 'pago')
+                GROUP BY p.id, p.nome
+                ORDER BY total_vendido DESC
+                LIMIT 5
+            """)
+            self.dados_relatorio_atual['top_produtos'] = cursor.fetchall()
+            
+            # Pedidos por status
+            cursor.execute("""
+                SELECT status, COUNT(*) as quantidade
+                FROM pedidos
+                GROUP BY status
+                ORDER BY quantidade DESC
+            """)
+            self.dados_relatorio_atual['pedidos_status'] = cursor.fetchall()
+            
+            # Vendas por categoria (se houver tabela categorias)
+            try:
+                cursor.execute("""
+                    SELECT c.nome as categoria, COUNT(ip.id) as vendas, SUM(ip.valor_total) as receita
+                    FROM categorias c
+                    LEFT JOIN produtos p ON c.id = p.id_categoria
+                    LEFT JOIN itens_pedido ip ON p.id = ip.id_produto
+                    LEFT JOIN pedidos ped ON ip.id_pedido = ped.id
+                    WHERE ped.status IN ('finalizado', 'pago') OR ped.status IS NULL
+                    GROUP BY c.id, c.nome
+                    ORDER BY receita DESC
+                """)
+                self.dados_relatorio_atual['vendas_categoria'] = cursor.fetchall()
+            except:
+                self.dados_relatorio_atual['vendas_categoria'] = []
+                
+        except Exception as e:
+            print(f"Erro ao coletar dados detalhados: {e}")
+
     def atualizar_financeiro(self, cursor, data_inicio, data_fim):
-        """
-        Como não há campo de data nos pedidos, vamos calcular o total geral
-        Para implementar filtro por data, seria necessário adicionar uma coluna
-        data_pedido na tabela pedidos
-        """
         try:
             # Query para calcular receita total baseada nos itens dos pedidos
             cursor.execute("""
@@ -395,9 +450,15 @@ class TelaVerRelatorioModerna(tk.Toplevel):
             
             self.card_financeiro.update_value(valor_formatado)
             self.card_financeiro.update_description("Total em pedidos finalizados")
+            
+            # Armazenar para PDF
+            self.dados_relatorio_atual['receita_total'] = total
+            self.dados_relatorio_atual['receita_formatada'] = valor_formatado
+            
         except Error as e:
             print(f"Erro ao atualizar financeiro: {e}")
             self.card_financeiro.update_value("R$ 0,00")
+            self.dados_relatorio_atual['receita_total'] = 0
 
     def atualizar_clientes(self, cursor):
         try:
@@ -407,9 +468,14 @@ class TelaVerRelatorioModerna(tk.Toplevel):
             
             self.card_clientes.update_value(str(total_clientes))
             self.card_clientes.update_description("Total cadastrados")
+            
+            # Armazenar para PDF
+            self.dados_relatorio_atual['total_clientes'] = total_clientes
+            
         except Error as e:
             print(f"Erro ao atualizar clientes: {e}")
             self.card_clientes.update_value("0")
+            self.dados_relatorio_atual['total_clientes'] = 0
 
     def atualizar_produtos_alta(self, cursor, data_inicio, data_fim):
         """
@@ -431,13 +497,21 @@ class TelaVerRelatorioModerna(tk.Toplevel):
             if resultado:
                 produto_nome, quantidade = resultado
                 # Limitar o nome do produto para caber no card
+                produto_nome_curto = produto_nome
                 if len(produto_nome) > 15:
-                    produto_nome = produto_nome[:12] + "..."
-                self.card_produtos.update_value(produto_nome)
+                    produto_nome_curto = produto_nome[:12] + "..."
+                self.card_produtos.update_value(produto_nome_curto)
                 self.card_produtos.update_description(f"Vendidos: {quantidade} un.")
+                
+                # Armazenar para PDF
+                self.dados_relatorio_atual['produto_mais_vendido'] = produto_nome
+                self.dados_relatorio_atual['quantidade_mais_vendido'] = quantidade
             else:
                 self.card_produtos.update_value("Sem dados")
                 self.card_produtos.update_description("Nenhuma venda registrada")
+                self.dados_relatorio_atual['produto_mais_vendido'] = "Sem dados"
+                self.dados_relatorio_atual['quantidade_mais_vendido'] = 0
+                
         except Error as e:
             print(f"Erro ao atualizar produtos: {e}")
             self.card_produtos.update_value("Sem dados")
@@ -450,64 +524,261 @@ class TelaVerRelatorioModerna(tk.Toplevel):
             
             self.card_funcionarios.update_value(str(total_funcionarios))
             self.card_funcionarios.update_description("Total na equipe")
+            
+            # Armazenar para PDF
+            self.dados_relatorio_atual['total_funcionarios'] = total_funcionarios
+            
         except Error as e:
             print(f"Erro ao atualizar funcionários: {e}")
             self.card_funcionarios.update_value("0")
+            self.dados_relatorio_atual['total_funcionarios'] = 0
 
     def exportar_relatorio(self):
         """
-        Função para exportar relatório - implementação básica
-        Você pode expandir para exportar para PDF, Excel, etc.
+        Função para exportar relatório em PDF
         """
         try:
-            # Conectar ao banco
-            conexao = mysql.connector.connect(
-                host='localhost',
-                user='emporioDoSabor',
-                password='admin321@s',
-                database='lanchonete_db'
+            # Verificar se há dados para exportar
+            if not hasattr(self, 'dados_relatorio_atual') or not self.dados_relatorio_atual:
+                messagebox.showwarning("Aviso", "Nenhum dado disponível para exportar. Atualize o relatório primeiro.")
+                return
+            
+            # Abrir diálogo para escolher onde salvar
+            filename = filedialog.asksaveasfilename(
+                initialfile="relatorio.pdf",  # CORRETO: initialfile
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")]
             )
-            cursor = conexao.cursor()
-            
-            # Coletar dados para exportação
-            dados_relatorio = self.coletar_dados_exportacao(cursor)
-            
-            # Por enquanto, apenas mostrar uma mensagem
-            messagebox.showinfo("Exportar", 
-                               f"Relatório coletado com sucesso!\n"
-                               f"Clientes: {dados_relatorio['total_clientes']}\n"
-                               f"Funcionários: {dados_relatorio['total_funcionarios']}\n"
-                               f"Produtos cadastrados: {dados_relatorio['total_produtos']}\n"
-                               f"Pedidos: {dados_relatorio['total_pedidos']}")
-            
-        except Error as e:
-            messagebox.showerror("Erro", f"Erro ao exportar relatório: {e}")
-        finally:
-            if 'conexao' in locals() and conexao.is_connected():
-                cursor.close()
-                conexao.close()
 
-    def coletar_dados_exportacao(self, cursor):
-        """Coleta dados para exportação"""
-        dados = {}
+            if not filename:
+                return  # Usuário cancelou
+            
+            # Gerar o PDF
+            self.gerar_pdf(filename)
+
+            # Confirmar exportação
+            messagebox.showinfo("Sucesso", f"Relatório exportado com sucesso!\n\nArquivo salvo em:\n{filename}")
+
+            # Perguntar se quer abrir o arquivo
+            if messagebox.askyesno("Abrir arquivo", "Deseja abrir o relatório PDF agora?"):
+                try:
+                    os.startfile(filename)  # Windows
+                except:
+                    try:
+                        os.system(f"open '{filename}'")  # macOS
+                    except:
+                        try:
+                            os.system(f"xdg-open '{filename}'")  # Linux
+                        except:
+                            messagebox.showinfo("Info", f"Arquivo salvo em: {filename}")
+
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar relatório: {e}")
+
+    def gerar_pdf(self, nome_arquivo):
+        """Gera o arquivo PDF com os dados do relatório"""
         
-        # Total de clientes
-        cursor.execute("SELECT COUNT(*) FROM clientes")
-        dados['total_clientes'] = cursor.fetchone()[0]
+        # Criar documento PDF
+        doc = SimpleDocTemplate(nome_arquivo, pagesize=A4)
+        story = []
         
-        # Total de funcionários
-        cursor.execute("SELECT COUNT(*) FROM funcionarios")
-        dados['total_funcionarios'] = cursor.fetchone()[0]
+        # Configurar estilos
+        styles = getSampleStyleSheet()
         
-        # Total de produtos
-        cursor.execute("SELECT COUNT(*) FROM produtos")
-        dados['total_produtos'] = cursor.fetchone()[0]
+        # Estilo personalizado para título
+        titulo_style = ParagraphStyle(
+            'TituloCustom',
+            parent=styles['Heading1'],
+            fontSize=20,
+            textColor=colors.HexColor('#2E86AB'),
+            alignment=TA_CENTER,
+            spaceAfter=30
+        )
         
-        # Total de pedidos
-        cursor.execute("SELECT COUNT(*) FROM pedidos")
-        dados['total_pedidos'] = cursor.fetchone()[0]
+        # Estilo para subtítulos
+        subtitulo_style = ParagraphStyle(
+            'SubtituloCustom',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#A23B72'),
+            spaceBefore=20,
+            spaceAfter=10
+        )
         
-        return dados
+        # Estilo para texto normal
+        texto_style = ParagraphStyle(
+            'TextoCustom',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.black,
+            alignment=TA_LEFT
+        )
+        
+        # CABEÇALHO DO RELATÓRIO
+        story.append(Paragraph("🏪 EMPÓRIO DO SABOR", titulo_style))
+        story.append(Paragraph("Relatório Analytics Completo", styles['Heading2']))
+        story.append(Spacer(1, 20))
+        
+        # Informações do relatório
+        data_atual = datetime.now().strftime("%d/%m/%Y às %H:%M")
+        info_relatorio = f"""
+        <b>Data de Geração:</b> {data_atual}<br/>
+        <b>Período Analisado:</b> {self.periodo_selecionado}<br/>
+        <b>Sistema:</b> Empório do Sabor - Analytics Dashboard
+        """
+        story.append(Paragraph(info_relatorio, texto_style))
+        story.append(Spacer(1, 30))
+        
+        # RESUMO EXECUTIVO
+        story.append(Paragraph("📊 RESUMO EXECUTIVO", subtitulo_style))
+        
+        # Tabela de métricas principais
+        metricas_data = [
+            ['Métrica', 'Valor', 'Descrição'],
+            ['Receita Total', self.dados_relatorio_atual.get('receita_formatada', 'R$ 0,00'), 'Vendas finalizadas'],
+            ['Clientes Cadastrados', str(self.dados_relatorio_atual.get('total_clientes', 0)), 'Base de clientes'],
+            ['Funcionários Ativos', str(self.dados_relatorio_atual.get('total_funcionarios', 0)), 'Equipe atual'],
+            ['Produto Top', self.dados_relatorio_atual.get('produto_mais_vendido', 'N/A'), f"Vendidos: {self.dados_relatorio_atual.get('quantidade_mais_vendido', 0)} un."]
+        ]
+        
+        # Criar tabela de métricas
+        tabela_metricas = Table(metricas_data, colWidths=[2*inch, 1.5*inch, 2*inch])
+        tabela_metricas.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+        ]))
+        
+        story.append(tabela_metricas)
+        story.append(Spacer(1, 30))
+        
+        # TOP 5 PRODUTOS MAIS VENDIDOS
+        if 'top_produtos' in self.dados_relatorio_atual and self.dados_relatorio_atual['top_produtos']:
+            story.append(Paragraph("🔥 TOP 5 PRODUTOS MAIS VENDIDOS", subtitulo_style))
+            
+            produtos_data = [['Produto', 'Quantidade Vendida', 'Receita Gerada']]
+            for produto in self.dados_relatorio_atual['top_produtos']:
+                nome, quantidade, receita = produto
+                receita_formatada = f"R$ {receita:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                produtos_data.append([nome, str(quantidade), receita_formatada])
+            
+            # Se tiver menos de 5 produtos, preencher com linhas vazias
+            while len(produtos_data) < 6:
+                produtos_data.append(['-', '-', '-'])
+            
+            tabela_produtos = Table(produtos_data, colWidths=[3*inch, 1.5*inch, 1.5*inch])
+            tabela_produtos.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF6B35')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+            ]))
+            
+            story.append(tabela_produtos)
+            story.append(Spacer(1, 25))
+        
+        # ANÁLISE DE PEDIDOS POR STATUS
+        if 'pedidos_status' in self.dados_relatorio_atual and self.dados_relatorio_atual['pedidos_status']:
+            story.append(Paragraph("📋 ANÁLISE DE PEDIDOS POR STATUS", subtitulo_style))
+            
+            status_data = [['Status do Pedido', 'Quantidade', 'Percentual']]
+            total_pedidos = sum([item[1] for item in self.dados_relatorio_atual['pedidos_status']])
+            
+            for status, quantidade in self.dados_relatorio_atual['pedidos_status']:
+                percentual = (quantidade / total_pedidos * 100) if total_pedidos > 0 else 0
+                status_formatado = status.replace('_', ' ').title() if status else 'Não definido'
+                status_data.append([status_formatado, str(quantidade), f"{percentual:.1f}%"])
+            
+            tabela_status = Table(status_data, colWidths=[2.5*inch, 1.5*inch, 1.5*inch])
+            tabela_status.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A23B72')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+            ]))
+            
+            story.append(tabela_status)
+            story.append(Spacer(1, 25))
+        
+        # VENDAS POR CATEGORIA (se disponível)
+        if 'vendas_categoria' in self.dados_relatorio_atual and self.dados_relatorio_atual['vendas_categoria']:
+            story.append(Paragraph("🏷️ VENDAS POR CATEGORIA", subtitulo_style))
+            
+            categoria_data = [['Categoria', 'Vendas', 'Receita']]
+            for categoria, vendas, receita in self.dados_relatorio_atual['vendas_categoria']:
+                if receita:  # Só mostrar categorias com vendas
+                    receita_formatada = f"R$ {receita:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    categoria_data.append([categoria, str(vendas or 0), receita_formatada])
+            
+            if len(categoria_data) > 1:  # Se há dados além do cabeçalho
+                tabela_categoria = Table(categoria_data, colWidths=[2.5*inch, 1.5*inch, 1.5*inch])
+                tabela_categoria.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F18F01')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 11),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+                ]))
+                
+                story.append(tabela_categoria)
+                story.append(Spacer(1, 25))
+        
+        # RODAPÉ INFORMATIVO
+        story.append(Spacer(1, 40))
+        story.append(Paragraph("📄 INFORMAÇÕES ADICIONAIS", subtitulo_style))
+        
+        info_adicional = f"""
+        <b>Observações importantes:</b><br/>
+        • Este relatório foi gerado automaticamente pelo sistema Empório do Sabor<br/>
+        • Os dados apresentados refletem o período {self.periodo_selecionado} selecionado<br/>
+        • Valores financeiros consideram apenas pedidos finalizados e pagos<br/>
+        • Para dúvidas sobre os dados, consulte o administrador do sistema<br/><br/>
+        
+        <b>Período de Análise:</b> {self.periodo_selecionado}<br/>
+        <b>Gerado em:</b> {data_atual}<br/>
+        <b>Sistema:</b> Empório do Sabor v1.0
+        """
+        
+        story.append(Paragraph(info_adicional, texto_style))
+        story.append(Spacer(1, 20))
+        
+        # Linha final
+        story.append(Paragraph("_" * 80, styles['Normal']))
+        story.append(Paragraph("Empório do Sabor - Relatório Analytics", 
+                             ParagraphStyle('Footer', parent=styles['Normal'], 
+                                          alignment=TA_CENTER, fontSize=8, 
+                                          textColor=colors.grey)))
+        
+        # Construir o PDF
+        doc.build(story)
 
 # Teste da aplicação
 if __name__ == "__main__":

@@ -320,8 +320,8 @@ class TelaGarcom:
     def abrir_mesa(self, numero):
         from PIL import Image, ImageTk
 
-        largura = 450  # AUMENTADO para acomodar observações
-        altura = 650   # AUMENTADO para acomodar observações
+        largura = 670
+        altura = 650
         pos_x = self.master.winfo_x()
         pos_y = self.master.winfo_y()
 
@@ -412,9 +412,13 @@ class TelaGarcom:
 
         # Total
         total_var = tk.StringVar(value="Total: R$ 0,00")
-        label_total = tk.Label(scrollable_frame, textvariable=total_var, 
-                              font=("Arial", 12, "bold"), fg="#00FF00", bg="#0A0B0A")
-        label_total.pack(pady=10)
+        label_total = tk.Label(frame_pedidos, textvariable=total_var, 
+                       font=("Arial", 18, "bold"), fg="#FFFFFF", bg="#0A0B0A")
+        label_total.pack(anchor="e", padx=50, pady=(5, 1))
+        
+        # Frame para os botões principais (dentro do scrollable_frame)
+        frame_botoes = tk.Frame(scrollable_frame, bg="#0A0B0A")
+        frame_botoes.pack(pady=(0, 0), padx=20, fill="x")
 
         # Carrega pedidos existentes
         if self.status_mesas[numero] == "ocupada":
@@ -950,52 +954,326 @@ class TelaGarcom:
             tk.Label(scrollable_conta, text="Obrigado pela preferência!", 
                     font=("Arial", 10, "italic"), bg="white", fg="#666666").pack(pady=20)
 
-            # Botão fechar
-            tk.Button(janela_conta, text="Fechar", font=("Arial", 12, "bold"), 
-                     bg="#DC3545", fg="white", command=janela_conta.destroy).pack(pady=10)
+            # Frame para os botões (lado a lado)
+            frame_botoes = tk.Frame(janela_conta, bg="white")
+            frame_botoes.pack(pady=10)
+
+            # Função corrigida para pagar conta
+            def pagar_conta_corrigida():
+                """Função corrigida para processar o pagamento da conta"""
+                # Criar janela de pagamento
+                janela_pagamento = tk.Toplevel(janela_conta)
+                janela_pagamento.title("Formas de Pagamento")
+                janela_pagamento.geometry("500x350")
+                janela_pagamento.configure(bg="white")
+                janela_pagamento.resizable(False, False)
+                
+                # Centralizar a janela
+                janela_pagamento.transient(janela_conta)
+                janela_pagamento.grab_set()
+                
+                # Centralizar na tela
+                largura_janela = 500
+                altura_janela = 350
+                largura_tela = janela_pagamento.winfo_screenwidth()
+                altura_tela = janela_pagamento.winfo_screenheight()
+                pos_x = (largura_tela // 2) - (largura_janela // 2)
+                pos_y = (altura_tela // 2) - (altura_janela // 2)
+                janela_pagamento.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
+
+                # Cabeçalho
+                frame_header_pag = tk.Frame(janela_pagamento, bg="#16a34a", height=80)
+                frame_header_pag.pack(fill="x")
+                frame_header_pag.pack_propagate(False)
+
+                tk.Label(frame_header_pag, text="💳 FORMA DE PAGAMENTO", 
+                        font=("Arial", 16, "bold"), bg="#16a34a", fg="white").pack(expand=True)
+
+                # Frame principal
+                frame_principal = tk.Frame(janela_pagamento, bg="white")
+                frame_principal.pack(fill="both", expand=True, padx=20, pady=20)
+
+                # Valor total (usando a variável local)
+                tk.Label(frame_principal, text=f"Total a pagar: R$ {total_geral:.2f}", 
+                        font=("Arial", 14, "bold"), bg="white", fg="#1e293b").pack(pady=(0, 20))
+
+                # Título das opções
+                tk.Label(frame_principal, text="Selecione a forma de pagamento:", 
+                        font=("Arial", 12), bg="white", fg="#374151").pack(pady=(0, 15))
+
+                # Frame dos botões de pagamento
+                frame_botoes_pag = tk.Frame(frame_principal, bg="white")
+                frame_botoes_pag.pack(fill="x", pady=10)
+
+                # Função para processar pagamento selecionado
+                def processar_pagamento(metodo, metodo_display):
+                    try:
+                        # Conectar ao banco de dados
+                        conn = mysql.connector.connect(
+                            host="localhost",
+                            user="emporioDoSabor",
+                            password="admin321@s",
+                            database="lanchonete_db"
+                        )
+                        cursor = conn.cursor()
+                        
+                        # Atualizar o pedido no banco de dados com a forma de pagamento
+                        cursor.execute("""
+                            UPDATE pedidos 
+                            SET forma_pagamento = %s, status = 'finalizado'
+                            WHERE numero_mesa = %s 
+                            AND (status IS NULL OR status != 'finalizado')
+                        """, (metodo, numero))
+                        
+                        conn.commit()
+                        cursor.close()
+                        conn.close()
+                        
+                        # Fechar janela de pagamento
+                        janela_pagamento.destroy()
+                        
+                        # Mostrar confirmação
+                        messagebox.showinfo("Pagamento Confirmado", 
+                                        f"Pagamento de R$ {total_geral:.2f} realizado via {metodo_display}!\n\n"
+                                        f"Mesa {numero} finalizada com sucesso.")
+                        
+                        # Fechar janela da conta
+                        janela_conta.destroy()
+                        
+                        # Liberar a mesa
+                        self.status_mesas[numero] = "livre"
+                        self.pedidos_por_mesa[numero] = []
+                        self.observacoes_por_mesa[numero] = ""
+                        self.atualizar_cor_mesa(numero)
+                        self.indicadores_status[numero].place_forget()
+                        
+                    except mysql.connector.Error as error:
+                        messagebox.showerror("Erro", f"Erro ao processar pagamento: {error}")
+                    except Exception as e:
+                        messagebox.showerror("Erro", f"Erro inesperado ao processar pagamento: {e}")
+
+                # Botões de pagamento em grid 2x2
+                botoes_frame = tk.Frame(frame_botoes_pag, bg="white")
+                botoes_frame.pack(expand=True)
+
+                # Primeira linha
+                tk.Button(botoes_frame, text="💳 Cartão de Débito", 
+                        font=("Arial", 11, "bold"), bg="#2563eb", fg="white",
+                        relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                        command=lambda: processar_pagamento("débito", "Cartão de Débito")).grid(row=0, column=0, padx=5, pady=5)
+
+                tk.Button(botoes_frame, text="💳 Cartão de Crédito", 
+                        font=("Arial", 11, "bold"), bg="#7c3aed", fg="white",
+                        relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                        command=lambda: processar_pagamento("crédito", "Cartão de Crédito")).grid(row=0, column=1, padx=5, pady=5)
+
+                # Segunda linha
+                tk.Button(botoes_frame, text="📱 PIX", 
+                        font=("Arial", 11, "bold"), bg="#059669", fg="white",
+                        relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                        command=lambda: processar_pagamento("pix", "PIX")).grid(row=1, column=0, padx=5, pady=5)
+
+                tk.Button(botoes_frame, text="💵 Dinheiro", 
+                        font=("Arial", 11, "bold"), bg="#dc2626", fg="white",
+                        relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                        command=lambda: processar_pagamento("dinheiro", "Dinheiro")).grid(row=1, column=1, padx=5, pady=5)
+
+                # Botão cancelar
+                tk.Button(frame_principal, text="❌ Cancelar", 
+                        font=("Arial", 10), bg="#6b7280", fg="white",
+                        relief="flat", padx=15, pady=5, cursor="hand2",
+                        command=janela_pagamento.destroy).pack(pady=(20, 0))
+
+                # Configurar tecla ESC para fechar
+                janela_pagamento.bind("<Escape>", lambda e: janela_pagamento.destroy())
+
+            # Botão PAGAR (usando a função corrigida)
+            tk.Button(frame_botoes, text="💳 PAGAR", font=("Arial", 12, "bold"), 
+                    bg="#16a34a", fg="white", relief="flat", padx=20, pady=8,
+                    cursor="hand2", 
+                    command=pagar_conta_corrigida).pack(side="left", padx=5)
+            
+            # Botão FECHAR
+            tk.Button(frame_botoes, text="❌ FECHAR", font=("Arial", 12, "bold"), 
+                    bg="#DC3545", fg="white", relief="flat", padx=20, pady=8,
+                    cursor="hand2",
+                    command=janela_conta.destroy).pack(side="left", padx=5)
+            
+        def pagar_conta(self, janela_conta):
+            """Função para processar o pagamento da conta"""
+            # Criar janela de pagamento
+            janela_pagamento = tk.Toplevel(janela_conta)
+            janela_pagamento.title("Formas de Pagamento")
+            janela_pagamento.geometry("500x350")
+            janela_pagamento.configure(bg="white")
+            janela_pagamento.resizable(False, False)
+            
+            # Centralizar a janela
+            janela_pagamento.transient(janela_conta)
+            janela_pagamento.grab_set()
+            
+            # Centralizar na tela
+            largura_janela = 500
+            altura_janela = 350
+            largura_tela = janela_pagamento.winfo_screenwidth()
+            altura_tela = janela_pagamento.winfo_screenheight()
+            pos_x = (largura_tela // 2) - (largura_janela // 2)
+            pos_y = (altura_tela // 2) - (altura_janela // 2)
+            janela_pagamento.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
+
+            # Cabeçalho
+            frame_header_pag = tk.Frame(janela_pagamento, bg="#16a34a", height=80)
+            frame_header_pag.pack(fill="x")
+            frame_header_pag.pack_propagate(False)
+
+            tk.Label(frame_header_pag, text="💳 FORMA DE PAGAMENTO", 
+                    font=("Arial", 16, "bold"), bg="#16a34a", fg="white").pack(expand=True)
+
+            # Frame principal
+            frame_principal = tk.Frame(janela_pagamento, bg="white")
+            frame_principal.pack(fill="both", expand=True, padx=20, pady=20)
+
+            # Valor total
+            tk.Label(frame_principal, text=f"Total a pagar: R$ {self.total_pedido:.2f}", 
+                    font=("Arial", 14, "bold"), bg="white", fg="#1e293b").pack(pady=(0, 20))
+
+            # Título das opções
+            tk.Label(frame_principal, text="Selecione a forma de pagamento:", 
+                    font=("Arial", 12), bg="white", fg="#374151").pack(pady=(0, 15))
+
+            # Frame dos botões de pagamento
+            frame_botoes_pag = tk.Frame(frame_principal, bg="white")
+            frame_botoes_pag.pack(fill="x", pady=10)
+
+            # Função para processar pagamento selecionado
+            def processar_pagamento(metodo, metodo_display):
+                try:
+                    # Atualizar o pedido no banco de dados com a forma de pagamento
+                    cursor = self.conn.cursor()
+                    cursor.execute("""
+                        UPDATE pedidos 
+                        SET forma_pagamento = %s, status = 'finalizado'
+                        WHERE numero_pedido = %s
+                    """, (metodo, self.numero_pedido))
+                    self.conn.commit()
+                    cursor.close()
+                    
+                    # Fechar janela de pagamento
+                    janela_pagamento.destroy()
+                    
+                    # Mostrar confirmação
+                    messagebox.showinfo("Pagamento Confirmado", 
+                                    f"Pagamento de R$ {self.total_pedido:.2f} realizado via {metodo_display}!\n\n"
+                                    f"Pedido {self.numero_pedido} finalizado com sucesso.")
+                    
+                    # Fechar janela da conta
+                    janela_conta.destroy()
+                    
+                except Exception as e:
+                    messagebox.showerror("Erro", f"Erro ao processar pagamento: {e}")
+
+            # Botões de pagamento em grid 2x2
+            botoes_frame = tk.Frame(frame_botoes_pag, bg="white")
+            botoes_frame.pack(expand=True)
+
+            # Primeira linha
+            tk.Button(botoes_frame, text="💳 Cartão de Débito", 
+                    font=("Arial", 11, "bold"), bg="#2563eb", fg="white",
+                    relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                    command=lambda: processar_pagamento("débito", "Cartão de Débito")).grid(row=0, column=0, padx=5, pady=5)
+
+            tk.Button(botoes_frame, text="💳 Cartão de Crédito", 
+                    font=("Arial", 11, "bold"), bg="#7c3aed", fg="white",
+                    relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                    command=lambda: processar_pagamento("crédito", "Cartão de Crédito")).grid(row=0, column=1, padx=5, pady=5)
+
+            # Segunda linha
+            tk.Button(botoes_frame, text="📱 PIX", 
+                    font=("Arial", 11, "bold"), bg="#059669", fg="white",
+                    relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                    command=lambda: processar_pagamento("pix", "PIX")).grid(row=1, column=0, padx=5, pady=5)
+
+            tk.Button(botoes_frame, text="💵 Dinheiro", 
+                    font=("Arial", 11, "bold"), bg="#dc2626", fg="white",
+                    relief="flat", padx=20, pady=10, cursor="hand2", width=15,
+                    command=lambda: processar_pagamento("dinheiro", "Dinheiro")).grid(row=1, column=1, padx=5, pady=5)
+
+            # Botão cancelar
+            tk.Button(frame_principal, text="❌ Cancelar", 
+                    font=("Arial", 10), bg="#6b7280", fg="white",
+                    relief="flat", padx=15, pady=5, cursor="hand2",
+                    command=janela_pagamento.destroy).pack(pady=(20, 0))
+
+            # Configurar tecla ESC para fechar
+            janela_pagamento.bind("<Escape>", lambda e: janela_pagamento.destroy())
+
+        def salvar_pdf_conta(self):
+            """Função para salvar a conta em PDF (implementação básica)"""
+            try:
+                # Aqui você pode implementar a geração de PDF
+                # Por exemplo, usando reportlab ou weasyprint
+                messagebox.showinfo("PDF", "Função de geração de PDF não implementada ainda.")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao gerar PDF: {e}")
 
         # Atualiza a exibição inicial
         atualizar_texto()
+        
+        # Parâmetros de estilo padrão
+        largura_botao = 20
+        altura_ipady = 6
+        pad_x = 4
+        pad_y = 6
 
-        # Frame de botões
-        frame_botoes = tk.Frame(scrollable_frame, bg="#0A0B0A")
-        frame_botoes.pack(pady=15, padx=20, fill="x")
+        # Grid para organizar os botões principais em 3 linhas x 4 colunas
+        btn_adicionar = tk.Button(frame_botoes, text="➕ Adicionar", font=("Arial", 9, "bold"),
+                                bg="#28a745", fg="white", activebackground="#1e7e34",
+                                relief="flat", bd=0, width=largura_botao,
+                                command=adicionar_produto)
+        btn_adicionar.grid(row=0, column=0, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
-        # Primeira linha de botões
-        frame_linha1 = tk.Frame(frame_botoes, bg="#0A0B0A")
-        frame_linha1.pack(fill="x", pady=5)
+        btn_remover = tk.Button(frame_botoes, text="❌ Remover", font=("Arial", 9, "bold"),
+                                bg="#dc3545", fg="white", activebackground="#c82333",
+                                relief="flat", bd=0, width=largura_botao,
+                                command=remover_ultimo)
+        btn_remover.grid(row=0, column=1, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
-        tk.Button(frame_linha1, text="➕ Adicionar", font=("Arial", 10, "bold"), 
-                 bg="#28a745", fg="white", command=adicionar_produto).pack(side="left", padx=5)
+        btn_salvar_obs = tk.Button(frame_botoes, text="💾 Salvar Obs", font=("Arial", 9, "bold"),
+                                bg="#17a2b8", fg="white", activebackground="#138496",
+                                relief="flat", bd=0, width=largura_botao,
+                                command=salvar_observacoes)
+        btn_salvar_obs.grid(row=1, column=0, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
-        tk.Button(frame_linha1, text="❌ Remover Último", font=("Arial", 10, "bold"), 
-                 bg="#dc3545", fg="white", command=remover_ultimo).pack(side="left", padx=5)
+        btn_cozinha = tk.Button(frame_botoes, text="🍳 Cozinha", font=("Arial", 9, "bold"),
+                                bg="#ff8c00", fg="white", activebackground="#e67e00",
+                                relief="flat", bd=0, width=largura_botao,
+                                command=enviar_para_cozinha)
+        btn_cozinha.grid(row=1, column=1, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
-        tk.Button(frame_linha1, text="💾 Salvar Obs.", font=("Arial", 10, "bold"), 
-                 bg="#17a2b8", fg="white", command=salvar_observacoes).pack(side="right", padx=5)
+        btn_conta = tk.Button(frame_botoes, text="📄 Gerar Conta", font=("Arial", 9, "bold"),
+                            bg="#6f42c1", fg="white", activebackground="#5a32a3",
+                            relief="flat", bd=0, width=largura_botao,
+                            command=gerar_conta)
+        btn_conta.grid(row=2, column=0, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
-        # Segunda linha de botões
-        frame_linha2 = tk.Frame(frame_botoes, bg="#0A0B0A")
-        frame_linha2.pack(fill="x", pady=5)
+        btn_finalizar = tk.Button(frame_botoes, text="✅ Finalizar", font=("Arial", 9, "bold"),
+                                bg="#28a745", fg="white", activebackground="#1e7e34",
+                                relief="flat", bd=0, width=largura_botao,
+                                command=finalizar_mesa)
+        btn_finalizar.grid(row=2, column=1, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
-        tk.Button(frame_linha2, text="🍳 Enviar p/ Cozinha", font=("Arial", 10, "bold"), 
-                 bg="#ff8c00", fg="white", command=enviar_para_cozinha).pack(side="left", padx=5)
+        # Botões Cancelar e Fechar alinhados na mesma linha
+        btn_cancelar = tk.Button(frame_botoes, text="🗑️ Cancelar", font=("Arial", 9, "bold"),
+                                bg="#dc3545", fg="white", activebackground="#c82333",
+                                relief="flat", bd=0, width=largura_botao,
+                                command=cancelar_pedido)
+        btn_cancelar.grid(row=2, column=2, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
-        tk.Button(frame_linha2, text="📄 Gerar Conta", font=("Arial", 10, "bold"), 
-                 bg="#6f42c1", fg="white", command=gerar_conta).pack(side="left", padx=5)
-
-        # Terceira linha de botões
-        frame_linha3 = tk.Frame(frame_botoes, bg="#0A0B0A")
-        frame_linha3.pack(fill="x", pady=5)
-
-        tk.Button(frame_linha3, text="✅ Finalizar Mesa", font=("Arial", 10, "bold"), 
-                 bg="#28a745", fg="white", command=finalizar_mesa).pack(side="left", padx=5)
-
-        tk.Button(frame_linha3, text="🗑️ Cancelar Pedido", font=("Arial", 10, "bold"), 
-                 bg="#dc3545", fg="white", command=cancelar_pedido).pack(side="left", padx=5)
-
-        tk.Button(frame_linha3, text="❌ Fechar", font=("Arial", 10, "bold"), 
-                 bg="#6c757d", fg="white", command=janela_pedido.destroy).pack(side="right", padx=5)
+        btn_fechar = tk.Button(frame_botoes, text="❌ Fechar", font=("Arial", 9, "bold"),
+                            bg="#6c757d", fg="white", activebackground="#545b62",
+                            relief="flat", bd=0, width=largura_botao,
+                            command=janela_pedido.destroy)
+        btn_fechar.grid(row=2, column=3, padx=pad_x, pady=pad_y, ipady=altura_ipady, sticky="w")
 
         # Foco inicial no campo de busca
         entrada_produto.focus()

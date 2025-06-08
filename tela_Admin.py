@@ -83,7 +83,7 @@ class TelaAdmin:
             fg="white",
             padx=10,
             pady=20,
-            command=self.abrir_relatorio
+            command=self.ver_relatorio
         )
 
         self.botao_sair_conta = tk.Button(
@@ -119,9 +119,9 @@ class TelaAdmin:
         janela_cadastro.grab_set()
         self.master.withdraw()
 
-    def abrir_relatorio(self):
-        print("Aqui irá abrir o relatório")
-        # Aqui você implementará a tela_Relatorio mais tarde
+    def ver_relatorio(self):
+        from tela_Ver_Relatorio import TelaVerRelatorioModerna
+        nova_janela = TelaVerRelatorioModerna(master=tk._default_root)
 
     def sair_conta(self):
         if messagebox.askokcancel("Sair", "Você tem certeza que deseja sair?"):

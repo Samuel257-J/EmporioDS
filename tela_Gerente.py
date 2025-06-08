@@ -132,9 +132,19 @@ class TelaGerente:
             self.ao_sair_callback()
 
 class TelaCadastroProduto(tk.Toplevel):
-    def __init__(self, master):
+    def __init__(self, master, produto_para_editar=None):
         super().__init__(master)
-        self.title("Cadastro de Produto")
+        
+        # Armazenar o produto sendo editado
+        self.produto_editando = produto_para_editar
+        self.modo_edicao = produto_para_editar is not None
+        
+        # Configurar título baseado no modo
+        if self.modo_edicao:
+            self.title("Editar Produto")
+        else:
+            self.title("Cadastro de Produto")
+            
         self.geometry("400x400")
         self.resizable(False, False)
 
@@ -159,8 +169,18 @@ class TelaCadastroProduto(tk.Toplevel):
         self.canvas.pack(fill="both", expand=True)
         self.canvas.create_image(0, 0, image=self.fundo, anchor="nw")
 
-        # Widgets sobre o canvas
+        # Criar widgets
+        self.criar_widgets()
+        
+        # Se estiver em modo de edição, preencher os campos
+        if self.modo_edicao:
+            self.preencher_campos_edicao()
+
+    def criar_widgets(self):
+        """Cria todos os widgets da interface"""
         y = 60
+        
+        # Nome do produto
         self.label_nome = tk.Label(self.canvas, text="Nome do Produto:", font=("Arial", 12, "bold"),
                                    fg="white", bg="#0A0B0A")
         self.canvas.create_window(200, y, window=self.label_nome)
@@ -170,6 +190,7 @@ class TelaCadastroProduto(tk.Toplevel):
         self.canvas.create_window(200, y, window=self.entry_nome)
         y += 35
 
+        # Categoria
         self.label_categoria = tk.Label(self.canvas, text="Categoria:", font=("Arial", 12, "bold"),
                                         fg="white", bg="#0A0B0A")
         self.canvas.create_window(200, y, window=self.label_categoria)
@@ -177,12 +198,12 @@ class TelaCadastroProduto(tk.Toplevel):
 
         self.combo_categoria = ttk.Combobox(self.canvas, font=("Arial", 12), state="readonly")
         self.combo_categoria['values'] = [
-            "Pastel", "Coxinha", "Empada",
-            "Hambúrguer", "Porções", "Bebidas", "Sobremesa"
+            "Pastel", "Coxinha", "Hambúrguer", "Porção", "Massa", "Bebida", "Sobremesa"
         ]
         self.canvas.create_window(200, y, window=self.combo_categoria)
         y += 35
 
+        # Preço
         self.label_preco = tk.Label(self.canvas, text="Preço:", font=("Arial", 12, "bold"),
                                     fg="white", bg="#0A0B0A")
         self.canvas.create_window(200, y, window=self.label_preco)
@@ -196,6 +217,7 @@ class TelaCadastroProduto(tk.Toplevel):
         self.canvas.create_window(200, y, window=self.entry_preco)
         y += 35
 
+        # Estoque
         self.label_estoque = tk.Label(self.canvas, text="Estoque (quantidade):", font=("Arial", 12, "bold"),
                                       fg="white", bg="#0A0B0A")
         self.canvas.create_window(200, y, window=self.label_estoque)
@@ -205,28 +227,117 @@ class TelaCadastroProduto(tk.Toplevel):
         self.canvas.create_window(200, y, window=self.entry_estoque)
         y += 40
 
-        self.botao_cadastrar = tk.Button(self.canvas, text="Cadastrar", font=("Arial", 12, "bold"),
-                                         bg="#4CAF50", fg="white", width=15, command=self.salvar_produto)
-        self.canvas.create_window(200, 340, window=self.botao_cadastrar)
+        # Botão que muda texto e comando baseado no modo
+        texto_botao = "Atualizar" if self.modo_edicao else "Cadastrar"
+        cor_botao = "#FF9800" if self.modo_edicao else "#4CAF50"
+        
+        self.botao_salvar = tk.Button(self.canvas, text=texto_botao, font=("Arial", 12, "bold"),
+                                      bg=cor_botao, fg="white", width=15, command=self.salvar_produto)
+        self.canvas.create_window(200, 340, window=self.botao_salvar)
 
+    def proteger_prefixo(self, event=None):
+        """Protege o prefixo R$ no campo de preço"""
+        valor_atual = self.var_preco.get()
+        if not valor_atual.startswith("R$"):
+            self.var_preco.set("R$" + valor_atual.replace("R$", ""))
+            self.entry_preco.icursor(tk.END)
+
+    def preencher_campos_edicao(self):
+        """Preenche os campos com os dados do produto sendo editado"""
+        if not self.produto_editando:
+            return
+            
+        print(f"Preenchendo campos com produto: {self.produto_editando}")  # Debug
+        
+        try:
+            # Limpar campos primeiro
+            self.entry_nome.delete(0, tk.END)
+            self.entry_estoque.delete(0, tk.END)
+            
+            # Assumindo que produto_editando é uma tupla com ordem: (id, nome, preco, categoria, estoque)
+            # Ajuste os índices conforme a estrutura real do seu banco de dados
+            
+            # Preencher nome (índice 1)
+            self.entry_nome.insert(0, str(self.produto_editando[1]))
+            
+            # Selecionar categoria no combobox (índice 3)
+            if len(self.produto_editando) > 3 and self.produto_editando[3]:
+                self.combo_categoria.set(str(self.produto_editando[3]))
+            
+            # Preencher preço (índice 2)
+            if len(self.produto_editando) > 2:
+                preco = self.produto_editando[2]
+                try:
+                    if preco is None or preco == '':
+                        preco_float = 0.0
+                    else:
+                        preco_float = float(preco)
+                    self.var_preco.set(f"R${preco_float:.2f}")
+                except (ValueError, TypeError):
+                    self.var_preco.set("R$0.00")
+            
+            # Preencher estoque (índice 4)
+            if len(self.produto_editando) > 4:
+                self.entry_estoque.insert(0, str(self.produto_editando[4]))
+                
+        except Exception as e:
+            print(f"Erro ao preencher campos: {e}")
+            messagebox.showerror("Erro", f"Erro ao carregar dados do produto:\n{e}", parent=self)
+
+    def validar_campos(self):
+        """Valida se todos os campos obrigatórios estão preenchidos"""
+        # Validar nome
+        if not self.entry_nome.get().strip():
+            messagebox.showerror("Erro", "O nome do produto é obrigatório!", parent=self)
+            return False
+        
+        # Validar categoria
+        if not self.combo_categoria.get():
+            messagebox.showerror("Erro", "Selecione uma categoria!", parent=self)
+            return False
+        
+        # Validar preço
+        preco_str = self.var_preco.get().replace("R$", "").replace(",", ".")
+        try:
+            preco = float(preco_str)
+            if preco <= 0:
+                messagebox.showerror("Erro", "O preço deve ser maior que zero!", parent=self)
+                return False
+        except ValueError:
+            messagebox.showerror("Erro", "Digite um preço válido!", parent=self)
+            return False
+        
+        # Validar estoque
+        try:
+            estoque = int(self.entry_estoque.get())
+            if estoque < 0:
+                messagebox.showerror("Erro", "O estoque não pode ser negativo!", parent=self)
+                return False
+        except ValueError:
+            messagebox.showerror("Erro", "Digite uma quantidade válida para o estoque!", parent=self)
+            return False
+        
+        return True
 
     def salvar_produto(self):
-        nome = self.entry_nome.get()
+        """Método principal que decide se vai cadastrar ou atualizar"""
+        if not self.validar_campos():
+            return
+        
+        if self.modo_edicao:
+            self.atualizar_produto()
+        else:
+            self.cadastrar_produto()
+
+    def cadastrar_produto(self):
+        """Cadastra um novo produto"""
+        # Obter valores dos campos
+        nome = self.entry_nome.get().strip()
         categoria = self.combo_categoria.get()
-        preco = self.entry_preco.get().replace("R$", "").replace(",", ".").strip()
-        estoque = self.entry_estoque.get()
-
-        if not nome or not categoria or not preco.strip("R$") or not estoque:
-            messagebox.showwarning("Atenção", "Preencha todos os campos!")
-            return
-
-        try:
-            preco_float = float(preco)
-            estoque_int = int(estoque)
-        except ValueError:
-            messagebox.showerror("Erro", "Preço deve ser numérico e estoque deve ser inteiro.")
-            return
-
+        preco_str = self.var_preco.get().replace("R$", "").replace(",", ".")
+        preco = float(preco_str)
+        estoque = int(self.entry_estoque.get())
+        
         try:
             conexao = mysql.connector.connect(
                 host='localhost',
@@ -235,31 +346,108 @@ class TelaCadastroProduto(tk.Toplevel):
                 database='lanchonete_db'
             )
             cursor = conexao.cursor()
-
-            cursor.execute("""
-                INSERT INTO produtos (nome, categoria, preco, estoque)
-                VALUES (%s, %s, %s, %s)
-            """, (nome, categoria, preco_float, estoque_int))
+            
+            # Verificar se já existe produto com o mesmo nome
+            cursor.execute("SELECT id FROM produtos WHERE nome = %s", (nome,))
+            if cursor.fetchone():
+                messagebox.showerror("Erro", "Já existe um produto com esse nome!", parent=self)
+                return
+            
+            # Inserir novo produto
+            query = """
+                INSERT INTO produtos (nome, preco, categoria, estoque, ativo)
+                VALUES (%s, %s, %s, %s, TRUE)
+            """
+            valores = (nome, preco, categoria, estoque)
+            
+            cursor.execute(query, valores)
             conexao.commit()
-
-            messagebox.showinfo("Produto Cadastrado", f"{nome} foi cadastrado com sucesso!")
-            self.destroy()
-
-        except Error as e:
-            messagebox.showerror("Erro ao cadastrar", f"Erro: {e}")
+            
+            messagebox.showinfo("Sucesso", f"Produto '{nome}' cadastrado com sucesso!", parent=self)
+            
+            # Limpar campos para novo cadastro
+            self.entry_nome.delete(0, tk.END)
+            self.combo_categoria.set("")
+            self.var_preco.set("R$")
+            self.entry_estoque.delete(0, tk.END)
+            
+        except mysql.connector.Error as e:
+            messagebox.showerror("Erro", f"Erro ao cadastrar produto:\n{e}", parent=self)
+            if 'conexao' in locals() and conexao.is_connected():
+                conexao.rollback()
         finally:
             if 'conexao' in locals() and conexao.is_connected():
                 cursor.close()
                 conexao.close()
 
-    def proteger_prefixo(self, event=None):
-        texto = self.var_preco.get()
-        if not texto.startswith("R$"):
-            texto = "R$" + texto.lstrip("R$")
-        parte_numerica = ''.join(c for c in texto[2:] if c.isdigit() or c == ',')
-        self.var_preco.set("R$" + parte_numerica)
-        if self.entry_preco.index(tk.INSERT) < 2:
-            self.entry_preco.icursor(2)
+    def atualizar_produto(self):
+        """Atualiza um produto existente"""
+        if not self.produto_editando:
+            messagebox.showerror("Erro", "Nenhum produto selecionado para edição!", parent=self)
+            return
+            
+        # Obter valores dos campos
+        nome = self.entry_nome.get().strip()
+        categoria = self.combo_categoria.get()
+        preco_str = self.var_preco.get().replace("R$", "").replace(",", ".")
+        preco = float(preco_str)
+        estoque = int(self.entry_estoque.get())
+        
+        # Obter ID do produto
+        produto_id = self.produto_editando[0]
+        
+        print(f"Atualizando produto ID: {produto_id}")  # Debug
+        print(f"Novos valores: nome={nome}, categoria={categoria}, preco={preco}, estoque={estoque}")  # Debug
+        
+        try:
+            conexao = mysql.connector.connect(
+                host='localhost',
+                user='emporioDoSabor',
+                password='admin321@s',
+                database='lanchonete_db'
+            )
+            cursor = conexao.cursor()
+            
+            # Verificar se já existe outro produto com o mesmo nome (exceto o atual)
+            cursor.execute("SELECT id FROM produtos WHERE nome = %s AND id != %s", (nome, produto_id))
+            if cursor.fetchone():
+                messagebox.showerror("Erro", "Já existe um produto com esse nome!", parent=self)
+                return
+            
+            # Atualizar produto
+            query = """
+                UPDATE produtos 
+                SET nome = %s, preco = %s, categoria = %s, estoque = %s
+                WHERE id = %s
+            """
+            valores = (nome, preco, categoria, estoque, produto_id)
+            
+            print(f"Executando query: {query}")  # Debug
+            print(f"Com valores: {valores}")  # Debug
+            
+            cursor.execute(query, valores)
+            conexao.commit()
+            
+            print(f"Linhas afetadas: {cursor.rowcount}")  # Debug
+            
+            if cursor.rowcount > 0:
+                messagebox.showinfo("Sucesso", f"Produto '{nome}' atualizado com sucesso!", parent=self)
+                self.destroy()
+            else:
+                messagebox.showwarning("Aviso", "Nenhuma alteração foi feita. Verifique se o produto existe.", parent=self)
+            
+        except mysql.connector.Error as e:
+            print(f"Erro MySQL: {e}")  # Debug
+            messagebox.showerror("Erro", f"Erro ao atualizar produto:\n{e}", parent=self)
+            if 'conexao' in locals() and conexao.is_connected():
+                conexao.rollback()
+        except Exception as e:
+            print(f"Erro geral: {e}")  # Debug
+            messagebox.showerror("Erro", f"Erro inesperado:\n{e}", parent=self)
+        finally:
+            if 'conexao' in locals() and conexao.is_connected():
+                cursor.close()
+                conexao.close()
 
 if __name__ == "__main__":
     def voltar_para_login():

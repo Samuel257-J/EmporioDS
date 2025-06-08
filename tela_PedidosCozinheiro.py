@@ -251,7 +251,7 @@ class TelaPedidosCozinheiro:
         numero_mesa = pedido.get('numero_mesa')
         cliente_nome = pedido.get('cliente', '')
         cliente_telefone = pedido.get('telefone', '')
-        observacoes = pedido.get('observacoes', '')  # NOVO: Obter observações do pedido
+        observacoes = pedido.get('observacoes', '')  # Obter observações do pedido
     
         # Determinar se é pedido de viagem ou mesa
         is_viagem = numero_mesa is None
@@ -279,7 +279,7 @@ class TelaPedidosCozinheiro:
         # Título diferente para viagem
         if is_viagem:
             titulo_texto = "🚗 PEDIDO VIAGEM"
-            info_adicional = f"Cliente: {cliente_nome}" if cliente_nome else "Cliente não informado"
+            info_adicional = f"Cliente: {cliente_nome.split()[0]}" if cliente_nome else "Cliente não informado"
         else:
             titulo_texto = f"🍽️ MESA {numero_mesa}"
             info_adicional = f"Pedido #{id_pedido}"
@@ -423,15 +423,16 @@ class TelaPedidosCozinheiro:
 
     def descontar_estoque(self, id_pedido, cursor):
         """
-        Desconta os itens do pedido do estoque dos produtos
+        Desconta os itens do pedido do estoque dos produtos e registra a saída na tabela 'estoque'
         """
         try:
-            # Buscar todos os itens do pedido
+            # CORRIGIDO: Agrupar itens por produto e somar as quantidades
             cursor.execute("""
-                SELECT i.id_produto, i.quantidade, p.nome, p.estoque
+                SELECT i.id_produto, SUM(i.quantidade) as quantidade_total, p.nome, p.estoque
                 FROM itens_pedido i
                 JOIN produtos p ON i.id_produto = p.id
                 WHERE i.id_pedido = %s
+                GROUP BY i.id_produto, p.nome, p.estoque
             """, (id_pedido,))
             
             itens_pedido = cursor.fetchall()
@@ -440,12 +441,12 @@ class TelaPedidosCozinheiro:
             # Verificar se há estoque suficiente para todos os itens
             for item in itens_pedido:
                 id_produto = item['id_produto']
-                quantidade_pedida = item['quantidade']
+                quantidade_total = item['quantidade_total']  # MUDOU: agora usa quantidade_total
                 estoque_atual = item['estoque']
                 nome_produto = item['nome']
                 
-                if estoque_atual < quantidade_pedida:
-                    produtos_sem_estoque.append(f"• {nome_produto}: Estoque atual ({estoque_atual}) menor que a quantidade pedida ({quantidade_pedida})")
+                if estoque_atual < quantidade_total:
+                    produtos_sem_estoque.append(f"• {nome_produto}: Estoque atual ({estoque_atual}) menor que a quantidade total pedida ({quantidade_total})")
             
             # Se houver produtos sem estoque suficiente, mostrar erro
             if produtos_sem_estoque:
@@ -454,21 +455,27 @@ class TelaPedidosCozinheiro:
                 return False
             
             # Se chegou até aqui, há estoque suficiente para todos os itens
-            # Fazer o desconto do estoque
             for item in itens_pedido:
                 id_produto = item['id_produto']
-                quantidade_pedida = item['quantidade']
+                quantidade_total = item['quantidade_total']  # MUDOU: agora usa quantidade_total
                 estoque_atual = item['estoque']
-                novo_estoque = estoque_atual - quantidade_pedida
+                novo_estoque = estoque_atual - quantidade_total
                 
+                # Atualizar o estoque no produto
                 cursor.execute("""
                     UPDATE produtos 
                     SET estoque = %s 
                     WHERE id = %s
                 """, (novo_estoque, id_produto))
-            
+
+                # Inserir movimentação de saída na tabela 'estoque'
+                cursor.execute("""
+                    INSERT INTO estoque (id_produto, quantidade_entrada, quantidade_saida)
+                    VALUES (%s, %s, %s)
+                """, (id_produto, 0, quantidade_total))  # MUDOU: usa quantidade_total
+
             return True
-            
+
         except mysql.connector.Error as e:
             messagebox.showerror("Erro", f"Erro ao descontar estoque:\n{e}", parent=self.master)
             return False
