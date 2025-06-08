@@ -268,6 +268,7 @@ class TelaVerRelatorioModerna(tk.Toplevel):
         )
         self.card_funcionarios.pack(side="left", padx=8, fill="both", expand=True)
 
+    # não consegui implementar o gráfico
     def criar_secao_graficos(self):
         graficos_frame = tk.Frame(self.main_frame, bg=self.colors['bg_primary'])
         graficos_frame.pack(pady=15, fill="x")

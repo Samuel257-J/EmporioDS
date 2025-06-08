@@ -123,7 +123,7 @@ class TelaCadastroCliente:
         campo_frame = tk.Frame(parent, bg=self.cores['bg_card'])
         campo_frame.grid(row=row, column=0, sticky='ew', pady=(0, 15))
         
-        # Label moderna
+        # Label 
         label = tk.Label(
             campo_frame,
             text=label_text,

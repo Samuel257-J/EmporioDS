@@ -10,7 +10,7 @@ from pathlib import Path
 class TelaLogin:
     def __init__(self, master, ao_logar_callback=None):  
         self.master = master
-        # Definir o ícone da janela
+        # Ícone da Janela
         caminho_icone = Path(__file__).parent / "ImagensProjeto" / "iconEmporio.png"
         try:
             icone = tk.PhotoImage(file=str(caminho_icone))
@@ -18,7 +18,10 @@ class TelaLogin:
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao carregar ícone:\n{e}")
 
+
         self.ao_logar_callback = ao_logar_callback
+        
+        # Configurações da Janela
         self.master.title("LOGIN - Empório do Sabor")	
         self.master.geometry("425x582")
         self.master.resizable(False, False)
@@ -35,7 +38,7 @@ class TelaLogin:
 
         self.master.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
 
-
+        # Configurar imagem de fundo
         script_dir = Path(__file__).parent
         caminho_imagem = script_dir / "ImagensProjeto" / "telaLogin.png"
 
@@ -51,6 +54,7 @@ class TelaLogin:
         self.canvas.pack(fill="both", expand=True)
         self.canvas.create_image(0, 0, image=self.fundo, anchor="nw")
 
+        # Campos de Entrada e Botões
         self.entry_usuario = tk.Entry(self.master, font=("Arial", 14))
         self.entry_senha = tk.Entry(self.master, font=("Arial", 14), show="*")
         self.botao_login = tk.Button(self.master, text="Entrar", font=("Arial", 10, "bold"),
@@ -132,7 +136,7 @@ class TelaLogin:
         """Criar botão com caracteres Unicode mais modernos"""
         self.botao_mostrar_senha = tk.Button(
             self.master,
-            text="◉",  # ou use "●" ou "○"
+            text="◉", 
             font=("Arial", 14),
             width=2,
             height=1,
@@ -183,7 +187,7 @@ class TelaLogin:
 
             TelaAdmin(janela_admin, ao_sair_admin)  
             return
-
+        # Verifica se os campos estão preenchidos
         if not usuario or not senha:
             messagebox.showwarning("Campos vazios", "Preencha usuário e senha.")
             return
@@ -195,7 +199,7 @@ class TelaLogin:
                 password='admin321@s',
                 database='lanchonete_db'
             )
-
+            # Verifica se a conexão foi bem-sucedida
             if conexao.is_connected():
                 cursor = conexao.cursor()
                 sql = "SELECT * FROM funcionarios WHERE usuario = %s AND senha = %s"
@@ -209,7 +213,7 @@ class TelaLogin:
                     self.master.withdraw()
 
                     cargo = cargo.strip().lower()
-
+                    # Dependendo do cargo, abre a tela correspondente
                     if cargo == "garçom":
                         from tela_Garcom import TelaGarcom
                         janela = tk.Toplevel(self.master)
@@ -267,6 +271,7 @@ class TelaLogin:
                 cursor.close()
                 conexao.close()
 
+    # Função para abrir a tela de cadastro de funcionários
     def abrir_cadastro(self):
         def verificar_admin():
             usuario = entry_admin_usuario.get()
@@ -274,7 +279,7 @@ class TelaLogin:
 
             USUARIO_ADMIN_FIXO = "admin"
             SENHA_ADMIN_FIXO = "123456"
-
+            # Autenticação do admin
             if usuario == USUARIO_ADMIN_FIXO and senha == SENHA_ADMIN_FIXO:
                 messagebox.showinfo("Acesso liberado", "Administrador autenticado.")
                 janela_admin_login.destroy()
@@ -324,7 +329,7 @@ class TelaLogin:
         entry_admin_senha = tk.Entry(janela_admin_login, show="*")
         entry_admin_senha.pack()
 
-        # Frame para os botões (para organizá-los lado a lado)
+        # Frame para os botões 
         frame_botoes = tk.Frame(janela_admin_login)
         frame_botoes.pack(pady=15)
 
