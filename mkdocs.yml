@@ -1,0 +1,9 @@
+site_name: Sistema de Gestão de Lanchonete
+
+nav:
+  - Home: index.md
+  - Requisitos: requisitos.md
+  - Diagrama de Casos de Uso: diagrama_caso_uso.md
+  - Protótipos Figma: prototipos_figma.md
+  - Conclusão: conclusao.md
+  - Códigos do Sistema: codigo_fonte.md
